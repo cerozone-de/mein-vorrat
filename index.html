@@ -940,41 +940,18 @@ async function fileToCanvas(file) {
 // Diese Funktion macht das Bild schärfer, erhöht den Kontrast und konvertiert
 // in Schwarz-Weiß – das erhöht die Tesseract-Erkennungsrate deutlich.
 function preprocessCanvas(canvas) {
+  // Nur skalieren – keine Farbmanipulation die invertieren könnte
   const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-
-  // 1. Auf max. 2000px begrenzen (zu hohe Auflösung verlangsamt OCR)
-  if (w > 2000 || h > 2000) {
-    const scale = Math.min(2000 / w, 2000 / h);
+  const maxSize = 1800;
+  if (canvas.width > maxSize || canvas.height > maxSize) {
+    const scale = Math.min(maxSize / canvas.width, maxSize / canvas.height);
     const tmp = document.createElement('canvas');
-    tmp.width = Math.round(w * scale); tmp.height = Math.round(h * scale);
+    tmp.width = Math.round(canvas.width * scale);
+    tmp.height = Math.round(canvas.height * scale);
     tmp.getContext('2d').drawImage(canvas, 0, 0, tmp.width, tmp.height);
     canvas.width = tmp.width; canvas.height = tmp.height;
     ctx.drawImage(tmp, 0, 0);
   }
-
-  // 2. Pixeldaten holen
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-
-  for (let i = 0; i < data.length; i += 4) {
-    // Graustufen (Luminanz-Formel)
-    const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-
-    // Kontrast erhöhen (S-Kurve)
-    const contrast = 1.8;
-    const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
-    let c = factor * (gray - 128) + 128;
-
-    // Adaptiver Schwellenwert → Schwarz/Weiß
-    // Heller als 140 → weiß (Hintergrund), dunkler → schwarz (Text)
-    c = Math.max(0, Math.min(255, c));
-
-    data[i] = data[i+1] = data[i+2] = c;
-    // Alpha unverändert lassen
-  }
-
-  ctx.putImageData(imageData, 0, 0);
 }
 
 async function runOcr(canvas) {
@@ -1037,71 +1014,78 @@ function parseReceipt(text) {
   if (detectedStore && state.stores.includes(detectedStore)) {
     document.getElementById('ocrStore').value = detectedStore;
   }
-  // Zeilen die definitiv keine Produkte sind
+
+  // Erste 3 Zeilen überspringen (fast immer Kopfzeile: Firmenname, Adresse, PLZ)
+  const allLines = text.split('\n').map(l => l.trim()).filter(l => l.length > 1);
+  const startIdx = Math.min(3, allLines.length);
+
   const skipPatterns = [
-    /^(mwst|ust|mehrwert|summe|total|gesamt|zwischen|bar |bargeld|rückgabe|rückgeld|wechselgeld|bezahlt|zahlung|kasse|bon|beleg|danke|subtotal|datum|öffnung|filiale|kassier|bedien|vielen|wiedersehen|artikel|normalpreis)/i,
-    /^\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4}(\s|$)/,   // Datum
-    /^\d{2}:\d{2}/,                                  // Uhrzeit
-    /^\d+[,\.]\d{2}\s*[A-Da-d]?\s*$/,               // Nur Preis
-    /^[^a-zA-ZäöüÄÖÜß]*$/,                          // Keine Buchstaben
-    /\d+[,\.]\d+\s*(EUR\/kg|EUR\/l|EUR\/St)/i,       // Gewichtspreis-Zeilen
-    /^[ABCabc]\s+\d+[,\.]\d+\s*%/,                  // Steuerklassen-Zeilen
-    /netto|brutto|steuer|inkl\.|exkl\./i,
+    // Summen & Zahlungen
+    /^(summe|zwischensumme|gesamtbetrag|total|gesamt|zwischen|bargeld|bar$|rückgabe|rückgeld|wechselgeld|bezahlt|zahlung)/i,
+    // Bon-Metadaten
+    /^(mwst|ust|mehrwertsteuer|steuer|netto|brutto|inkl\.|exkl\.)/i,
+    // Kasseninfo
+    /^(kasse|bon|beleg|bon-nr|belegnr|kassier|bedien|filiale|markt|vielen dank|auf wiedersehen|danke|öffnungszeit)/i,
+    // Datum & Uhrzeit
+    /datum|uhrzeit|\d{2}\.\d{2}\.\d{4}|\d{2}:\d{2}\s*(uhr)?$/i,
+    // Technische Daten (TSE, Transaktions- etc.)
+    /tse|transaktion|signatur|prüfwert|seriennr|serial|zähler|counter/i,
+    // Adresszeilen: PLZ + Ort, Straße + Hausnummer
+    /^\d{5}\s+\w/,         // PLZ Ort
+    /str(aße|\.)\s*\d/i,   // Straße 1
+    /straße|gasse|weg|allee|platz/i,
+    /gmbh|ag|kg|ug|e\.k\.|einzel/i,  // Firmenformen
+    // Nur Zahlen/Sonderzeichen
+    /^[^a-zA-ZäöüÄÖÜß]*$/,
+    // Artikelnummern-only Zeilen
+    /^\d{5,}$/,
+    // Normalpreis / Rabatt
+    /normalpreis|rabatt|ersparnis|aktion/i,
+    // Pfand
+    /pfand/i,
   ];
 
-  // Produktzeilen-Muster: REWE-Stil hat kein Präfix, tegut hat Preise am Ende
-  const lines = text
-    .split('\n')
-    .map(l => l.trim())
-    .filter(l => {
-      if (l.length < 3) return false;
-      // Muss mindestens 3 aufeinanderfolgende Buchstaben haben
-      if (!/[a-zA-ZäöüÄÖÜß]{3,}/.test(l)) return false;
-      if (skipPatterns.some(p => p.test(l))) return false;
-      // Zeilen die fast nur Sonderzeichen/Zahlen sind → weg
-      const letterCount = (l.match(/[a-zA-ZäöüÄÖÜß]/g) || []).length;
-      if (letterCount < 3) return false;
-      return true;
-    });
+  const lines = allLines.slice(startIdx).filter(l => {
+    if (l.length < 3) return false;
+    if (!/[a-zA-ZäöüÄÖÜß]{3,}/.test(l)) return false;
+    if (skipPatterns.some(p => p.test(l))) return false;
+    const letterCount = (l.match(/[a-zA-ZäöüÄÖÜß]/g) || []).length;
+    if (letterCount < 3) return false;
+    return true;
+  });
 
   const seen = new Set();
   ocrItems = lines.map(l => {
     let n = l
-      // Führende Sonderzeichen & Pipes entfernen: "| BIO Basilikum" → "BIO Basilikum"
-      .replace(/^[\|\[\]\{\}\,\.\!\?\;\:'"\£\$\€\#\*\+\-\_\/\\]+\s*/, '')
-      // Artikelnummer am Anfang (ALDI/Lidl): "43468 Produkt" → "Produkt"
+      // Führende 1-2 Zeichen Müll: "| ", "A ", "MM "
+      .replace(/^[^a-zA-ZäöüÄÖÜß0-9]{1,3}\s*/, '')
+      // Artikelnummer am Anfang (ALDI/Lidl): "43468 Produkt"
       .replace(/^\d{4,7}\s+/, '')
-      // Menge am Anfang: "2 x ", "3x "
+      // Menge: "1x ", "2 x "
       .replace(/^\d+\s*[xX]\s+/, '')
-      // Preise + Steuerklasse am Ende: "2,99 C" oder "1,49 A" oder "3,30"
-      .replace(/\s+\d+[,\.]\d{2}\s*[A-Ca-c]?\s*$/, '')
-      // EUR/kg Preisangaben in der Mitte: "0,624 kg x 3,99 EUR/kg"
-      .replace(/\d+[,\.]\d+\s*kg\s*x\s*\d+[,\.]\d+\s*EUR\/kg/gi, '')
-      // Gewichtsangaben: "125g", "200 g", "1kg", "0,5 l"
-      .replace(/\d+[,\.]?\d*\s*(kg|g|l|ml|cl|stk\.?)/gi, '')
-      // EUR-Preise irgendwo: "9,99 EUR"  
-      .replace(/\d+[,\.]\d+\s*EUR\s*/gi, '')
-      // Tailing Sonderzeichen
-      .replace(/[\|\[\]\{\}\)\(\!\?\;\:]+\s*$/, '')
-      // Mehrfache Leerzeichen
+      // Preis am Ende: "2,50 €", "1,99 A", "3,30 C"
+      .replace(/\s+\d+[,.]\d{2}\s*[€EUReurA-Ca-c]?\s*$/, '')
+      // "€" Zeichen und Preise wo auch immer
+      .replace(/\d+[,.]\d{2}\s*[€]?\s*/g, '')
+      .replace(/\d+[,.]\d+\s*(EUR|€)/gi, '')
+      // Gewichtsangaben
+      .replace(/\d+[,.]?\d*\s*(kg|g|l|ml|cl|stk\.?)/gi, '')
+      // Trailing Sonderzeichen
+      .replace(/[\|,.\-:;!?()[\]{}]+\s*$/, '')
       .replace(/\s{2,}/g, ' ')
       .trim();
 
-    // Nach Bereinigung zu kurz oder immer noch kein echter Text
     if (n.length < 3 || !/[a-zA-ZäöüÄÖÜß]{3,}/.test(n)) return null;
-
-    // Zeilen die nach Bereinigung hauptsächlich Zahlen/Sonderzeichen sind
     const letters = (n.match(/[a-zA-ZäöüÄÖÜß]/g) || []).length;
     if (letters < 3) return null;
 
-    // Alles-Großbuchstaben normalisieren: "VOLLMILCH" → "Vollmilch"
-    const letters_only = n.replace(/[^a-zA-ZäöüÄÖÜß]/g, '');
-    if (letters_only === letters_only.toUpperCase() && letters_only.length > 2) {
+    // Normalisierung Großschreibung
+    const lettersOnly = n.replace(/[^a-zA-ZäöüÄÖÜß]/g, '');
+    if (lettersOnly === lettersOnly.toUpperCase() && lettersOnly.length > 2) {
       n = n.charAt(0).toUpperCase() + n.slice(1).toLowerCase();
     }
     n = n.charAt(0).toUpperCase() + n.slice(1);
 
-    // Duplikate (Buchstaben-normalisiert vergleichen)
     const key = n.toLowerCase().replace(/[^a-zäöüß]/g, '');
     if (key.length < 3 || seen.has(key)) return null;
     seen.add(key);
