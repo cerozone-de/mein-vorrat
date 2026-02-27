@@ -646,12 +646,13 @@ function renderPantry() {
         <button class="sbtn sok" data-id="${item.id}" data-st="available" title="Vorhanden">✅</button>
         <button class="sbtn slow" data-id="${item.id}" data-st="low" title="Wenig">⚠️</button>
         <button class="sbtn sgone" data-id="${item.id}" data-st="empty" title="Leer">🔴</button>
+        <button class="sbtn sdel" data-id="${item.id}" title="Löschen" style="background:#f8d7da;font-size:14px">🗑️</button>
       </div>`;
-    let pt;
-    d.addEventListener('touchstart', () => { pt = setTimeout(() => delConfirm(item.id, item.name), 620); }, { passive: true });
-    d.addEventListener('touchend', () => clearTimeout(pt));
-    d.addEventListener('touchmove', () => clearTimeout(pt), { passive: true });
-    d.querySelectorAll('.sbtn').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); setStatus(b.dataset.id, b.dataset.st); }));
+    d.querySelectorAll('.sbtn').forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation();
+      if (b.classList.contains('sdel')) delConfirm(b.dataset.id, item.name);
+      else setStatus(b.dataset.id, b.dataset.st);
+    }));
     box.appendChild(d);
   });
 }
