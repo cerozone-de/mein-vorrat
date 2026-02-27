@@ -233,10 +233,10 @@ select.inp{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns
       <label class="flabel" style="margin-top:5px">Web App URL</label>
       <input type="url" class="inp" id="scriptUrl" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off">
       <div id="connStatus"></div>
-      <button class="btn btn-p btn-w" id="connectBtn">🔗 Verbinden & loslegen</button>
+      <button class="btn btn-p btn-w" onclick="doConnect()">🔗 Verbinden & loslegen</button>
     </div>
 
-    <button class="btn btn-w" style="background:transparent;color:var(--muted);border:2px solid var(--border);margin-top:4px" id="offlineBtn">
+    <button class="btn btn-w" style="background:transparent;color:var(--muted);border:2px solid var(--border);margin-top:4px" onclick="doOffline()">
       📱 Nur auf diesem Gerät (kein Teilen)
     </button>
   </div>
@@ -509,8 +509,8 @@ async function pushSheets() {
 // ──────────────────────────────────────────────────
 async function init() {
   loadCfg(); loadState();
-  injectManifest();
-  setupEvents();
+  try { injectManifest(); } catch(e) { console.warn("manifest:", e); }
+  try { setupEvents(); } catch(e) { console.warn("setupEvents error:", e); }
 
   // URL param: ?url=SCRIPT_URL (for easy sharing)
   const urlParam = new URLSearchParams(location.search).get('url');
@@ -1154,30 +1154,8 @@ function setupEvents() {
   });
   document.getElementById('storeInp').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('addStoreBtn').click(); });
 
-  // Setup page
-  document.getElementById('connectBtn').addEventListener('click', async () => {
-    const url = document.getElementById('scriptUrl').value.trim();
-    if (!url || !url.includes('script.google.com')) { showToast('❌ Bitte eine gültige Apps Script URL eingeben'); return; }
-    const btn = document.getElementById('connectBtn'); btn.textContent = '⏳ Verbinde…'; btn.disabled = true;
-    cfg.scriptUrl = url; cfg.mode = 'sheets'; savCfg();
-    try {
-      const ok = await pullSheets();
-      btn.textContent = '🔗 Verbinden & loslegen'; btn.disabled = false;
-      if (ok) {
-        showApp(); renderAll(); startAutoSync(); showToast('✅ Verbunden mit Google Sheets!');
-      } else {
-        // Trotzdem verbinden – vielleicht ist Sheet leer oder CORS-Problem
-        showApp(); renderAll(); startAutoSync();
-        showToast('⚠️ Verbunden – Sync wird im Hintergrund versucht');
-      }
-    } catch(e) {
-      btn.textContent = '🔗 Verbinden & loslegen'; btn.disabled = false;
-      // Auch bei Fehler verbinden – URL wurde gespeichert
-      showApp(); renderAll(); startAutoSync();
-      showToast('⚠️ Verbunden – prüfe Internetverbindung');
-    }
-  });
-  document.getElementById('offlineBtn').addEventListener('click', () => { cfg.mode = 'offline'; savCfg(); showApp(); renderAll(); showToast('📱 Lokaler Modus aktiv'); });
+  // Connect button handled via onclick in HTML (doConnect / doOffline)
+  // offlineBtn handled via onclick
 
   // More – connection actions
   document.getElementById('syncNowBtn').addEventListener('click', async () => { showToast('🔄 Synchronisiere…'); await pullSheets(); renderAll(); showToast('✅ Synchronisiert'); });
@@ -1199,6 +1177,25 @@ function setupEvents() {
   document.getElementById('clearBtn').addEventListener('click', () => {
     if (confirm('Wirklich ALLE Produkte löschen?')) { state.items = []; savState(); schedulePush(); renderAll(); showToast('🗑️ Alle Produkte gelöscht'); }
   });
+}
+
+// ──────────────────────────────────────────────────
+// SETUP ACTIONS – standalone so they work even if setupEvents() crashes
+// ──────────────────────────────────────────────────
+function doConnect() {
+  const inp = document.getElementById('scriptUrl');
+  if (!inp) return;
+  const url = inp.value.trim();
+  if (!url) { showToast('❌ Bitte URL eingeben'); return; }
+  cfg.scriptUrl = url; cfg.mode = 'sheets'; savCfg();
+  showApp(); renderAll(); startAutoSync();
+  showToast('✅ Verbunden! Daten werden geladen…');
+}
+
+function doOffline() {
+  cfg.mode = 'offline'; savCfg();
+  showApp(); renderAll();
+  showToast('📱 Lokaler Modus aktiv');
 }
 
 // ──────────────────────────────────────────────────
