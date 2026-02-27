@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JS Test</title>
+</head>
+<body style="font-family:sans-serif;padding:30px;text-align:center">
+  <h2>JavaScript Test</h2>
+  <p id="status" style="color:gray">Noch nicht geklickt</p>
+  <button onclick="document.getElementById('status').textContent='✅ JavaScript funktioniert!'; document.getElementById('status').style.color='green'"
+    style="padding:15px 30px;font-size:18px;background:green;color:white;border:none;border-radius:10px;margin:20px">
+    Hier tippen
+  </button>
+  <p id="jscheck" style="color:gray">JS lädt...</p>
+  <script>
+    document.getElementById('jscheck').textContent = '✅ Script-Tag wird ausgeführt';
+    document.getElementById('jscheck').style.color = 'green';
+  </script>
+</body>
+</html>
